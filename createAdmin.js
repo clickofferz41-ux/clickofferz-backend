@@ -8,7 +8,7 @@ const createDefaultAdmin = async () => {
         console.log('✅ Connected to MongoDB');
 
         // Check if admin already exists
-        const existingAdmin = await Admin.findOne({ email: 'admin@savingaura.com' });
+        const existingAdmin = await Admin.findOne({ email: 'admin@clickofferz.com' });
 
         if (existingAdmin) {
             console.log('⚠️  Default admin already exists');
@@ -17,14 +17,14 @@ const createDefaultAdmin = async () => {
 
         // Create default admin
         const admin = await Admin.create({
-            name: 'Admin',
-            email: 'admin@savingaura.com',
+            name: 'ClickOfferz Admin',
+            email: 'admin@clickofferz.com',
             password: 'Admin@123',
             role: 'super-admin'
         });
 
         console.log('✅ Default admin created successfully!');
-        console.log('📧 Email: admin@savingaura.com');
+        console.log('📧 Email: admin@clickofferz.com');
         console.log('🔑 Password: Admin@123');
         console.log('⚠️  Please change the password after first login!');
 

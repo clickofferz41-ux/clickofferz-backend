@@ -19,6 +19,26 @@ router.get('/', protect, async (req, res) => {
     }
 });
 
+// @route   GET /api/admin/coupons/:id
+// @desc    Get single coupon
+// @access  Private
+router.get('/:id', protect, async (req, res) => {
+    try {
+        const coupon = await Coupon.findById(req.params.id);
+
+        if (!coupon) {
+            return res.status(404).json({ error: 'Coupon not found' });
+        }
+
+        res.json({
+            success: true,
+            data: coupon
+        });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
 // @route   POST /api/admin/coupons
 // @desc    Create new coupon
 // @access  Private
