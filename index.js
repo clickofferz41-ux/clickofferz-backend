@@ -5,6 +5,7 @@ const connectDB = require('./config/database');
 const Store = require('./models/Store');
 const Coupon = require('./models/Coupon');
 const Category = require('./models/Category');
+const { cacheMiddleware, invalidateByPrefix, TTL } = require('./middleware/cache');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -36,7 +37,7 @@ app.get('/', (req, res) => {
 });
 
 // Public API Routes
-app.get('/api/stores', async (req, res) => {
+app.get('/api/stores', cacheMiddleware(TTL.MEDIUM), async (req, res) => {
     try {
         const stores = await Store.find().sort({ name: 1 }).lean();
 
@@ -59,7 +60,7 @@ app.get('/api/stores', async (req, res) => {
     }
 });
 
-app.get('/api/stores/:slug', async (req, res) => {
+app.get('/api/stores/:slug', cacheMiddleware(TTL.MEDIUM), async (req, res) => {
     try {
         const slug = req.params.slug;
         const stores = await Store.find();
@@ -78,7 +79,7 @@ app.get('/api/stores/:slug', async (req, res) => {
     }
 });
 
-app.get('/api/coupons', async (req, res) => {
+app.get('/api/coupons', cacheMiddleware(TTL.SHORT), async (req, res) => {
     try {
         const { type, category, store, trending, search, page, limit } = req.query;
         const filter = { isActive: true };
@@ -154,7 +155,7 @@ app.get('/api/coupons', async (req, res) => {
     }
 });
 
-app.get('/api/coupons/store/:slug', async (req, res) => {
+app.get('/api/coupons/store/:slug', cacheMiddleware(TTL.SHORT), async (req, res) => {
     try {
         const slug = req.params.slug;
         const stores = await Store.find();
@@ -246,7 +247,7 @@ app.use('/', require('./routes/sitemapRoutes'));
 
 // ===== CATEGORY ROUTES =====
 // Get all active categories (public)
-app.get('/api/categories', async (req, res) => {
+app.get('/api/categories', cacheMiddleware(TTL.LONG), async (req, res) => {
     try {
         const categories = await Category.find({ isActive: true }).sort({ name: 1 }).lean();
 
@@ -280,6 +281,7 @@ app.post('/api/admin/categories', require('./middleware/auth').protect, async (r
     try {
         console.log("Creating category with body:", { ...req.body, image: req.body.image ? `[Base64 Length: ${req.body.image.length}]` : null });
         const category = await Category.create(req.body);
+        invalidateByPrefix('/api/categories');
         res.status(201).json(category);
     } catch (error) {
         console.error("Create category error:", error);
@@ -299,6 +301,7 @@ app.put('/api/admin/categories/:id', require('./middleware/auth').protect, async
         if (!category) {
             return res.status(404).json({ error: 'Category not found' });
         }
+        invalidateByPrefix('/api/categories');
         res.json(category);
     } catch (error) {
         console.error("Update category error:", error);
@@ -313,6 +316,7 @@ app.delete('/api/admin/categories/:id', require('./middleware/auth').protect, as
         if (!category) {
             return res.status(404).json({ error: 'Category not found' });
         }
+        invalidateByPrefix('/api/categories');
         res.json({ message: 'Category deleted successfully' });
     } catch (error) {
         res.status(500).json({ error: error.message });

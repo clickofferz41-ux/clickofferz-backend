@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const Page = require('../models/Page');
 const protect = require('../middleware/auth').protect;
+const { cacheMiddleware, invalidateByPrefix, TTL } = require('../middleware/cache');
 
 // Get all pages (Admin - for list view)
 router.get('/admin/all', protect, async (req, res) => {
@@ -36,8 +37,9 @@ router.put('/:slug', protect, async (req, res) => {
         const page = await Page.findOneAndUpdate(
             { slug: req.params.slug },
             { content },
-            { new: true, upsert: true } // Create if doesn't exist
+            { new: true, upsert: true }
         );
+        invalidateByPrefix('/api/pages');
         res.json(page);
     } catch (error) {
         res.status(400).json({ error: error.message });
@@ -45,7 +47,7 @@ router.put('/:slug', protect, async (req, res) => {
 });
 
 // Get single page by slug (Public)
-router.get('/:slug', async (req, res) => {
+router.get('/:slug', cacheMiddleware(TTL.LONG), async (req, res) => {
     try {
         const page = await Page.findOne({ slug: req.params.slug });
         if (!page) {

@@ -2,11 +2,12 @@ const express = require('express');
 const router = express.Router();
 const SiteSetting = require('../models/SiteSetting');
 const { protect } = require('../middleware/auth');
+const { invalidateByPrefix, cacheMiddleware, TTL } = require('../middleware/cache');
 
 // @route   GET /api/settings
 // @desc    Get site settings (Public)
 // @access  Public
-router.get('/', async (req, res) => {
+router.get('/', cacheMiddleware(TTL.LONG), async (req, res) => {
     try {
         const settings = await SiteSetting.getSettings();
         res.json(settings);
@@ -33,6 +34,7 @@ router.put('/', protect, async (req, res) => {
         settings.lastUpdatedBy = req.admin._id;
 
         await settings.save();
+        invalidateByPrefix('/api/settings');
         res.json(settings);
     } catch (error) {
         res.status(500).json({ error: error.message });

@@ -2,9 +2,10 @@ const express = require('express');
 const router = express.Router();
 const Blog = require('../models/Blog');
 const protect = require('../middleware/auth').protect;
+const { invalidateByPrefix, cacheMiddleware, TTL } = require('../middleware/cache');
 
 // Get all blogs (Public)
-router.get('/', async (req, res) => {
+router.get('/', cacheMiddleware(TTL.MEDIUM), async (req, res) => {
     try {
         const page = parseInt(req.query.page) || 1;
         const limit = parseInt(req.query.limit) || 9;
@@ -95,6 +96,7 @@ router.post('/', protect, async (req, res) => {
             isActive
         });
 
+        invalidateByPrefix('/api/blogs');
         res.status(201).json(blog);
     } catch (error) {
         res.status(400).json({ error: error.message });
@@ -121,6 +123,7 @@ router.put('/:id', protect, async (req, res) => {
         // Only update slug if title changed significantly (optional, keeping stable URLs is usually better)
 
         await blog.save();
+        invalidateByPrefix('/api/blogs');
         res.json(blog);
     } catch (error) {
         res.status(400).json({ error: error.message });
@@ -134,6 +137,7 @@ router.delete('/:id', protect, async (req, res) => {
         if (!blog) {
             return res.status(404).json({ error: 'Blog not found' });
         }
+        invalidateByPrefix('/api/blogs');
         res.json({ message: 'Blog deleted successfully' });
     } catch (error) {
         res.status(500).json({ error: error.message });
