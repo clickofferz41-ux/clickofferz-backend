@@ -9,7 +9,7 @@ const { invalidateByPrefix } = require('../middleware/cache');
 // @access  Private
 router.get('/', protect, async (req, res) => {
     try {
-        const stores = await Store.find().sort({ createdAt: -1 });
+        const stores = await Store.find().sort({ createdAt: -1 }).lean();
         res.json({
             success: true,
             count: stores.length,
@@ -25,6 +25,10 @@ router.get('/', protect, async (req, res) => {
 // @access  Private
 router.post('/', protect, async (req, res) => {
     try {
+        // Ensure slug is generated from name
+        if (req.body.name && !req.body.slug) {
+            req.body.slug = req.body.name.trim().toLowerCase().replace(/\s+/g, '-');
+        }
         const store = await Store.create(req.body);
         invalidateByPrefix('/api/stores');
         res.status(201).json({

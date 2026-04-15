@@ -1,6 +1,7 @@
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
+const compression = require('compression');
 const connectDB = require('./config/database');
 const Store = require('./models/Store');
 const Coupon = require('./models/Coupon');
@@ -16,7 +17,8 @@ app.use(cors({
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization']
 }));
-app.use(express.json({ limit: '10mb' })); // Increased limit for base64 images
+app.use(compression());
+app.use(express.json({ limit: '10mb' }));
 
 // Connect to MongoDB before each request (serverless-friendly)
 app.use(async (req, res, next) => {
@@ -39,20 +41,39 @@ app.get('/', (req, res) => {
 // Public API Routes
 app.get('/api/stores', cacheMiddleware(TTL.MEDIUM), async (req, res) => {
     try {
-        const stores = await Store.find().sort({ name: 1 }).lean();
-
-        // Populate specific offer counts
-        const storesWithCounts = await Promise.all(stores.map(async (store) => {
-            const count = await Coupon.countDocuments({
-                $or: [
-                    { storeId: store._id },
-                    { storeName: store.name },
-                    { storeName: new RegExp(`^${store.name.trim()}$`, 'i') }
-                ],
-                isActive: true
-            });
-            return { ...store, offers: count };
-        }));
+        // Single aggregation instead of N+1 queries
+        const storesWithCounts = await Store.aggregate([
+            { $sort: { name: 1 } },
+            {
+                $lookup: {
+                    from: 'coupons',
+                    let: { storeId: '$_id', storeName: '$name' },
+                    pipeline: [
+                        {
+                            $match: {
+                                isActive: true,
+                                $expr: {
+                                    $or: [
+                                        { $eq: ['$storeId', '$$storeId'] },
+                                        { $eq: [{ $toLower: { $trim: { input: '$storeName' } } }, { $toLower: { $trim: { input: '$$storeName' } } }] }
+                                    ]
+                                }
+                            }
+                        },
+                        { $count: 'count' }
+                    ],
+                    as: 'couponData'
+                }
+            },
+            {
+                $addFields: {
+                    offers: {
+                        $ifNull: [{ $arrayElemAt: ['$couponData.count', 0] }, 0]
+                    }
+                }
+            },
+            { $project: { couponData: 0 } }
+        ]);
 
         res.json(storesWithCounts);
     } catch (error) {
@@ -63,11 +84,21 @@ app.get('/api/stores', cacheMiddleware(TTL.MEDIUM), async (req, res) => {
 app.get('/api/stores/:slug', cacheMiddleware(TTL.MEDIUM), async (req, res) => {
     try {
         const slug = req.params.slug;
-        const stores = await Store.find();
+        // Direct DB lookup by slug field instead of loading all stores
+        let store = await Store.findOne({ slug }).lean();
 
-        const store = stores.find(s =>
-            s.name.trim().toLowerCase().replace(/\s+/g, '-') === slug
-        );
+        // Fallback: compute slug from name for stores not yet migrated
+        if (!store) {
+            const allStores = await Store.find().select('name slug').lean();
+            const match = allStores.find(s =>
+                s.name.trim().toLowerCase().replace(/\s+/g, '-') === slug
+            );
+            if (match) {
+                // Migrate: save slug for future fast lookups
+                await Store.updateOne({ _id: match._id }, { slug });
+                store = await Store.findById(match._id).lean();
+            }
+        }
 
         if (!store) {
             return res.status(404).json({ error: 'Store not found' });
@@ -88,34 +119,30 @@ app.get('/api/coupons', cacheMiddleware(TTL.SHORT), async (req, res) => {
         if (category) filter.category = new RegExp(`^${category}$`, 'i');
 
         if (search) {
-            filter.$or = [
-                { title: new RegExp(search, 'i') },
-                { storeName: new RegExp(search, 'i') },
-                { description: new RegExp(search, 'i') }
-            ];
+            filter.$text = { $search: search };
         }
 
-
-
         if (store) {
-            // Robust store search: matches storeId, exact name, or fuzzy name
-            const stores = await Store.find();
-            const targetStore = stores.find(s =>
-                s.name.trim().toLowerCase().replace(/\s+/g, '-') === store.trim().toLowerCase().replace(/\s+/g, '-')
-            );
+            // Direct slug lookup instead of loading all stores
+            let targetStore = await Store.findOne({ slug: store.trim().toLowerCase().replace(/\s+/g, '-') }).lean();
+
+            // Fallback for unmigrated stores
+            if (!targetStore) {
+                targetStore = await Store.findOne({
+                    name: new RegExp(`^${store.trim()}$`, 'i')
+                }).lean();
+            }
 
             if (targetStore) {
                 const storeFilter = {
                     $or: [
                         { storeId: targetStore._id },
-                        { storeName: targetStore.name },
-                        { storeName: new RegExp(`^${targetStore.name.trim()}$`, 'i') }
+                        { storeName: targetStore.name }
                     ]
                 };
-                // Merge with existing $or if search exists
-                if (filter.$or) {
-                    filter.$and = [{ $or: filter.$or }, { $or: storeFilter.$or }];
-                    delete filter.$or; // Cleanup top-level $or
+                if (filter.$text) {
+                    filter.$and = [{ $text: filter.$text }, { $or: storeFilter.$or }];
+                    delete filter.$text;
                 } else {
                     Object.assign(filter, storeFilter);
                 }
@@ -125,21 +152,16 @@ app.get('/api/coupons', cacheMiddleware(TTL.SHORT), async (req, res) => {
         }
         if (trending === 'true') filter.isTrending = true;
 
-        let query = Coupon.find(filter).sort({ createdAt: -1 });
-
-        // Pagination parameters
+        // Always paginate - default to page 1, limit 20
         const pageNum = parseInt(page) || 1;
-        const limitNum = parseInt(limit) || 20; // Default to 20 if logic below requires it, but usually query param controls it
+        const limitNum = Math.min(parseInt(limit) || 20, 100);
+        const skip = (pageNum - 1) * limitNum;
 
-        if (page && limit) {
-            const skip = (pageNum - 1) * limitNum;
-            query = query.skip(skip).limit(limitNum);
-        } else if (limit) {
-            query = query.limit(parseInt(limit));
-        }
-
-        const total = await Coupon.countDocuments(filter);
-        const coupons = await query;
+        // Run count and find in parallel
+        const [total, coupons] = await Promise.all([
+            Coupon.countDocuments(filter),
+            Coupon.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limitNum).lean()
+        ]);
 
         res.json({
             coupons,
@@ -158,31 +180,31 @@ app.get('/api/coupons', cacheMiddleware(TTL.SHORT), async (req, res) => {
 app.get('/api/coupons/store/:slug', cacheMiddleware(TTL.SHORT), async (req, res) => {
     try {
         const slug = req.params.slug;
-        const stores = await Store.find();
+        // Direct slug lookup
+        let store = await Store.findOne({ slug }).lean();
 
-        // Robustly find the store using the same slug logic as frontend
-        const store = stores.find(s =>
-            s.name.trim().toLowerCase().replace(/\s+/g, '-') === slug
-        );
+        if (!store) {
+            const allStores = await Store.find().select('name slug _id').lean();
+            const match = allStores.find(s =>
+                s.name.trim().toLowerCase().replace(/\s+/g, '-') === slug
+            );
+            if (match) {
+                await Store.updateOne({ _id: match._id }, { slug });
+                store = match;
+            }
+        }
 
         if (!store) {
             return res.status(404).json({ error: 'Store not found' });
         }
 
-        // Find coupons for this specific store using robust matching
-        // Matches:
-        // 1. Exact storeId (ideal)
-        // 2. Exact storeName
-        // 3. Case-insensitive storeName
-        // 4. storeName with varying whitespace
         const coupons = await Coupon.find({
             $or: [
                 { storeId: store._id },
-                { storeName: store.name },
-                { storeName: new RegExp(`^${store.name.trim()}$`, 'i') }
+                { storeName: store.name }
             ],
             isActive: true
-        }).sort({ createdAt: -1 });
+        }).sort({ createdAt: -1 }).lean();
 
         res.json(coupons);
     } catch (error) {
@@ -194,24 +216,26 @@ app.get('/api/coupons/store/:slug', cacheMiddleware(TTL.SHORT), async (req, res)
 app.get('/api/debug/:slug', async (req, res) => {
     try {
         const slug = req.params.slug;
-        const stores = await Store.find();
-        const robustStore = stores.find(s => s.name.trim().toLowerCase().replace(/\s+/g, '-') === slug);
+        let robustStore = await Store.findOne({ slug }).lean();
+
+        if (!robustStore) {
+            const allStores = await Store.find().select('name slug _id').lean();
+            robustStore = allStores.find(s => s.name.trim().toLowerCase().replace(/\s+/g, '-') === slug) || null;
+        }
 
         let relatedCoupons = [];
         if (robustStore) {
             relatedCoupons = await Coupon.find({
                 $or: [
                     { storeId: robustStore._id },
-                    { storeName: robustStore.name },
-                    { storeName: new RegExp(`^${robustStore.name.trim()}$`, 'i') }
+                    { storeName: robustStore.name }
                 ]
-            });
+            }).lean();
         }
 
-        // Also find ANY coupons that might look like this store
         const looseMatchCoupons = await Coupon.find({
             storeName: new RegExp(slug.replace(/-/g, ' '), 'i')
-        }).limit(5);
+        }).limit(5).lean();
 
         res.json({
             requestedSlug: slug,
@@ -249,15 +273,24 @@ app.use('/', require('./routes/sitemapRoutes'));
 // Get all active categories (public)
 app.get('/api/categories', cacheMiddleware(TTL.LONG), async (req, res) => {
     try {
-        const categories = await Category.find({ isActive: true }).sort({ name: 1 }).lean();
+        // Single aggregation: get coupon counts per category, then merge with category data
+        const [categories, couponCounts] = await Promise.all([
+            Category.find({ isActive: true }).sort({ name: 1 }).lean(),
+            Coupon.aggregate([
+                { $match: { isActive: true } },
+                { $group: { _id: { $toLower: '$category' }, count: { $sum: 1 } } }
+            ])
+        ]);
 
-        // Populate coupon counts for each category
-        const categoriesWithCounts = await Promise.all(categories.map(async (cat) => {
-            const count = await Coupon.countDocuments({
-                category: new RegExp(`^${cat.name}$`, 'i'),
-                isActive: true
-            });
-            return { ...cat, couponCount: count };
+        // Build a map for O(1) lookup
+        const countMap = {};
+        for (const item of couponCounts) {
+            countMap[item._id] = item.count;
+        }
+
+        const categoriesWithCounts = categories.map(cat => ({
+            ...cat,
+            couponCount: countMap[cat.name.toLowerCase()] || 0
         }));
 
         res.json(categoriesWithCounts);
@@ -323,6 +356,23 @@ app.delete('/api/admin/categories/:id', require('./middleware/auth').protect, as
     }
 });
 
+// Migration endpoint - Populate slugs for existing stores
+app.post('/api/admin/migrate-slugs', require('./middleware/auth').protect, async (req, res) => {
+    try {
+        const stores = await Store.find({ $or: [{ slug: null }, { slug: { $exists: false } }] });
+        let updated = 0;
+        for (const store of stores) {
+            store.slug = store.name.trim().toLowerCase().replace(/\s+/g, '-');
+            await store.save();
+            updated++;
+        }
+        invalidateByPrefix('/api/stores');
+        res.json({ success: true, updated });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
 // Migration endpoint - Update all coupons with store logos
 app.post('/api/admin/migrate-coupon-logos', require('./middleware/auth').protect, async (req, res) => {
     try {
@@ -360,18 +410,30 @@ app.post('/api/admin/migrate-coupon-logos', require('./middleware/auth').protect
 // Dashboard Stats
 app.get('/api/admin/stats', require('./middleware/auth').protect, async (req, res) => {
     try {
-        const totalStores = await Store.countDocuments();
-        const totalCoupons = await Coupon.countDocuments();
-        const activeCoupons = await Coupon.countDocuments({ isActive: true });
-        const expiredCoupons = await Coupon.countDocuments({ isActive: false });
+        // Single parallel call instead of 4 sequential queries
+        const [totalStores, couponStats] = await Promise.all([
+            Store.countDocuments(),
+            Coupon.aggregate([
+                {
+                    $group: {
+                        _id: null,
+                        totalCoupons: { $sum: 1 },
+                        activeCoupons: { $sum: { $cond: ['$isActive', 1, 0] } },
+                        expiredCoupons: { $sum: { $cond: ['$isActive', 0, 1] } }
+                    }
+                }
+            ])
+        ]);
+
+        const stats = couponStats[0] || { totalCoupons: 0, activeCoupons: 0, expiredCoupons: 0 };
 
         res.json({
             success: true,
             data: {
                 totalStores,
-                totalCoupons,
-                activeCoupons,
-                expiredCoupons
+                totalCoupons: stats.totalCoupons,
+                activeCoupons: stats.activeCoupons,
+                expiredCoupons: stats.expiredCoupons
             }
         });
     } catch (error) {

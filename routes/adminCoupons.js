@@ -9,10 +9,21 @@ const { invalidateByPrefix } = require('../middleware/cache');
 // @access  Private
 router.get('/', protect, async (req, res) => {
     try {
-        const coupons = await Coupon.find().sort({ createdAt: -1 });
+        const page = parseInt(req.query.page) || 1;
+        const limit = Math.min(parseInt(req.query.limit) || 50, 200);
+        const skip = (page - 1) * limit;
+
+        const [coupons, total] = await Promise.all([
+            Coupon.find().sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
+            Coupon.countDocuments()
+        ]);
+
         res.json({
             success: true,
             count: coupons.length,
+            total,
+            page,
+            totalPages: Math.ceil(total / limit),
             data: coupons
         });
     } catch (error) {

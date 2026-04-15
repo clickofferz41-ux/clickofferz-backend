@@ -30,18 +30,17 @@ router.get('/', cacheMiddleware(TTL.MEDIUM), async (req, res) => {
 });
 
 // Get single blog by slug (Public)
-router.get('/:slug', async (req, res) => {
+router.get('/:slug', cacheMiddleware(TTL.SHORT), async (req, res) => {
     try {
-        const blog = await Blog.findOne({ slug: req.params.slug, isActive: true });
+        const blog = await Blog.findOne({ slug: req.params.slug, isActive: true }).lean();
         if (!blog) {
             return res.status(404).json({ error: 'Blog post not found' });
         }
 
-        // Increment views
-        blog.views += 1;
-        await blog.save();
+        // Increment views in background - don't block response
+        Blog.updateOne({ _id: blog._id }, { $inc: { views: 1 } }).catch(() => {});
 
-        res.json(blog);
+        res.json({ ...blog, views: blog.views + 1 });
     } catch (error) {
         res.status(500).json({ error: error.message });
     }

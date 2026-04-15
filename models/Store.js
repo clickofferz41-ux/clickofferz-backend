@@ -6,6 +6,11 @@ const StoreSchema = new mongoose.Schema({
         required: true,
         unique: true
     },
+    slug: {
+        type: String,
+        unique: true,
+        sparse: true
+    },
     logo: {
         type: String,
         required: true
@@ -33,6 +38,17 @@ const StoreSchema = new mongoose.Schema({
 }, {
     timestamps: true
 });
+
+// Auto-generate slug from name
+StoreSchema.pre('save', function (next) {
+    if (this.isModified('name') || !this.slug) {
+        this.slug = this.name.trim().toLowerCase().replace(/\s+/g, '-');
+    }
+    next();
+});
+
+StoreSchema.index({ slug: 1 });
+StoreSchema.index({ category: 1 });
 
 module.exports = mongoose.model('Store', StoreSchema);
 
