@@ -29,6 +29,11 @@ router.post('/', protect, async (req, res) => {
         if (req.body.name && !req.body.slug) {
             req.body.slug = req.body.name.trim().toLowerCase().replace(/\s+/g, '-');
         }
+        // Provide fallback logo so required field never blocks creation
+        if (!req.body.logo) {
+            req.body.logo = req.body.logoType === 'text' ? (req.body.name || '?') : '🏪';
+            req.body.logoType = req.body.logoType || 'emoji';
+        }
         const store = await Store.create(req.body);
         invalidateByPrefix('/api/stores');
         res.status(201).json({
@@ -36,7 +41,7 @@ router.post('/', protect, async (req, res) => {
             data: store
         });
     } catch (error) {
-        res.status(500).json({ error: error.message });
+        res.status(400).json({ error: error.message });
     }
 });
 
