@@ -1,0 +1,74 @@
+[
+    {
+        "id": 1,
+        "name": "Amazon",
+        "logo": "AM",
+        "offers": 15
+    },
+    {
+        "id": 2,
+        "name": "Nike",
+        "logo": "NK",
+        "offers": 8
+    },
+    {
+        "id": 3,
+        "name": "Walmart",
+        "logo": "WM",
+        "offers": 22
+    },
+    {
+        "id": 4,
+        "name": "Target",
+        "logo": "TG",
+        "offers": 12
+    },
+    {
+        "id": 5,
+        "name": "Best Buy",
+        "logo": "BB",
+        "offers": 5
+    },
+    {
+        "id": 6,
+        "name": "eBay",
+        "logo": "EB",
+        "offers": 18
+    },
+    {
+        "id": 7,
+        "name": "Samsung",
+        "logo": "SS",
+        "offers": 10
+    },
+    {
+        "id": 8,
+        "name": "Apple",
+        "logo": "AP",
+        "offers": 3
+    },
+    {
+        "id": 9,
+        "name": "Adidas",
+        "logo": "AD",
+        "offers": 14
+    },
+    {
+        "id": 10,
+        "name": "Macy's",
+        "logo": "MC",
+        "offers": 9
+    },
+    {
+        "id": 11,
+        "name": "Home Depot",
+        "logo": "HD",
+        "offers": 7
+    },
+    {
+        "id": 12,
+        "name": "Lowe's",
+        "logo": "LW",
+        "offers": 6
+    }
+]
