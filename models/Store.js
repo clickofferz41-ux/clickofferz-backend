@@ -39,12 +39,11 @@ const StoreSchema = new mongoose.Schema({
     timestamps: true
 });
 
-// Auto-generate slug from name
-StoreSchema.pre('save', function (next) {
+// Auto-generate slug from name (Mongoose 9+: no `next` callback in document middleware)
+StoreSchema.pre('save', function () {
     if (this.isModified('name') || !this.slug) {
         this.slug = this.name.trim().toLowerCase().replace(/\s+/g, '-');
     }
-    next();
 });
 
 StoreSchema.index({ category: 1 });

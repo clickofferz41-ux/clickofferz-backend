@@ -25,7 +25,6 @@ router.get('/', protect, async (req, res) => {
 // @access  Private
 router.post('/', protect, async (req, res) => {
     try {
-        console.log('[POST /api/admin/stores] body keys:', Object.keys(req.body || {}));
         if (!req.body.name || !req.body.name.trim()) {
             return res.status(400).json({ error: 'Store name is required.' });
         }
@@ -55,7 +54,6 @@ router.post('/', protect, async (req, res) => {
             const messages = Object.values(error.errors).map(e => e.message).join(', ');
             return res.status(400).json({ error: messages });
         }
-        console.error('[POST /api/admin/stores] Unhandled error:', error.name, error.message, error.code);
         res.status(500).json({ error: error.message });
     }
 });
