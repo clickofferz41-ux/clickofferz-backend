@@ -25,13 +25,16 @@ router.get('/', protect, async (req, res) => {
 // @access  Private
 router.post('/', protect, async (req, res) => {
     try {
-        // Ensure slug is generated from name
-        if (req.body.name && !req.body.slug) {
-            req.body.slug = req.body.name.trim().toLowerCase().replace(/\s+/g, '-');
+        if (!req.body.name || !req.body.name.trim()) {
+            return res.status(400).json({ error: 'Store name is required.' });
+        }
+        // Auto-generate slug from name
+        if (!req.body.slug) {
+            req.body.slug = req.body.name.trim().toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
         }
         // Provide fallback logo so required field never blocks creation
         if (!req.body.logo) {
-            req.body.logo = req.body.logoType === 'text' ? (req.body.name || '?') : '🏪';
+            req.body.logo = req.body.logoType === 'text' ? req.body.name.trim() : '🏪';
             req.body.logoType = req.body.logoType || 'emoji';
         }
         const store = await Store.create(req.body);
@@ -41,7 +44,17 @@ router.post('/', protect, async (req, res) => {
             data: store
         });
     } catch (error) {
-        res.status(400).json({ error: error.message });
+        // Duplicate key (name or slug already exists)
+        if (error.code === 11000) {
+            const field = Object.keys(error.keyPattern || {})[0] || 'name';
+            return res.status(400).json({ error: `A store with this ${field} already exists.` });
+        }
+        // Mongoose validation errors
+        if (error.name === 'ValidationError') {
+            const messages = Object.values(error.errors).map(e => e.message).join(', ');
+            return res.status(400).json({ error: messages });
+        }
+        res.status(500).json({ error: error.message });
     }
 });
 
@@ -65,6 +78,14 @@ router.put('/:id', protect, async (req, res) => {
             data: store
         });
     } catch (error) {
+        if (error.code === 11000) {
+            const field = Object.keys(error.keyPattern || {})[0] || 'name';
+            return res.status(400).json({ error: `A store with this ${field} already exists.` });
+        }
+        if (error.name === 'ValidationError') {
+            const messages = Object.values(error.errors).map(e => e.message).join(', ');
+            return res.status(400).json({ error: messages });
+        }
         res.status(500).json({ error: error.message });
     }
 });
