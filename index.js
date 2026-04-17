@@ -472,6 +472,18 @@ app.get('/api/admin/stats', require('./middleware/auth').protect, async (req, re
     }
 });
 
+// Global error handler — catches anything not handled by route-level try/catch
+app.use((err, req, res, next) => {
+    console.error('[Global Error]', err);
+    if (err.type === 'entity.too.large') {
+        return res.status(413).json({ error: 'Request body too large. Compress or resize the image before uploading.' });
+    }
+    if (err.status) {
+        return res.status(err.status).json({ error: err.message });
+    }
+    res.status(500).json({ error: err.message || 'Internal server error' });
+});
+
 // Start server
 // Start server only if running directly
 if (require.main === module) {
