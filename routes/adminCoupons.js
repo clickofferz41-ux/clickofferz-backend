@@ -10,7 +10,7 @@ const { invalidateByPrefix } = require('../middleware/cache');
 router.get('/', protect, async (req, res) => {
     try {
         const page = parseInt(req.query.page) || 1;
-        const limit = Math.min(parseInt(req.query.limit) || 100, 500);
+        const limit = Math.min(parseInt(req.query.limit) || 1300, 1300);
         const skip = (page - 1) * limit;
 
         const [coupons, total] = await Promise.all([
